@@ -1,0 +1,116 @@
+version: "3.8"
+
+# 鹰眼·监控告警平台 —— 与项目一并列部署在同一台虚拟机
+# 通过外部网络接入项目一（易栈）容器网络，实现跨项目监控
+#
+# 外部网络名 = <项目一目录名>_yizhan-net。默认项目一目录叫 yizhan-platform，
+# 若不同，先在项目一目录执行 `docker network ls | grep yizhan-net` 查出真实名称，
+# 再把下方 external.name 改掉。
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.4
+    container_name: hawk-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prom_data:/prometheus
+    ports: ["9090:9090"]
+    mem_limit: 768m
+    networks: [hawk-net, yizhan-net]
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: hawk-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports: ["9093:9093"]
+    mem_limit: 256m
+    networks: [hawk-net]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: hawk-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports: ["3000:3000"]
+    mem_limit: 512m
+    networks: [hawk-net, yizhan-net]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: hawk-node-exporter
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+    pid: host
+    mem_limit: 256m
+    networks: [hawk-net]
+    restart: unless-stopped
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.16.0
+    container_name: hawk-mysqld-exporter
+    environment:
+      # 采集项目一的 MySQL（容器名 yizhan-mysql，走外部网络）
+      # 账号由 alertservice 启动时自动创建（hawk_monitor / hawk123456）
+      MYSQLD_EXPORTER_PASSWORD: hawk123456
+    command:
+      # 用户名不能带密码，密码走上面的 MYSQLD_EXPORTER_PASSWORD 环境变量
+      - --mysqld.username=hawk_monitor
+      - --mysqld.address=yizhan-mysql:3306
+    mem_limit: 128m
+    networks: [hawk-net, yizhan-net]
+    restart: unless-stopped
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: hawk-blackbox-exporter
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    mem_limit: 128m
+    networks: [hawk-net, yizhan-net]
+    restart: unless-stopped
+
+  alertservice:
+    build: ./alertservice
+    image: hawk-alertservice:1.0
+    container_name: hawk-alertservice
+    environment:
+      DB_HOST: yizhan-mysql
+      DB_USER: hawk_eye
+      DB_PASSWORD: hawk123456
+      DB_NAME: hawk_eye
+    ports: ["8090:8080"]
+    mem_limit: 256m
+    networks: [hawk-net, yizhan-net]
+    restart: unless-stopped
+
+volumes:
+  prom_data:
+  grafana_data:
+
+networks:
+  hawk-net:
+    driver: bridge
+  yizhan-net:
+    external: true
+    name: yizhan-platform_yizhan-net

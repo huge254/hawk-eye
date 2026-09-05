@@ -1,0 +1,19 @@
+# Alertmanager 路由配置
+# 所有告警发送到鹰眼自研告警服务（webhook），由它入库 + 提供页面查询
+# 如需同时推钉钉/企业微信，可在 receivers 里追加 webhook_configs
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: hawk-eye-webhook
+  group_by: ['alertname']
+  group_wait: 10s        # 同组告警等 10 秒合并发送，减少重复
+  group_interval: 1m
+  repeat_interval: 1h    # 未恢复告警每小时重复提醒一次
+
+receivers:
+  - name: hawk-eye-webhook
+    webhook_configs:
+      - url: http://hawk-alertservice:8080/api/alert/webhook
+        send_resolved: true   # 恢复事件也发送，用于把状态更新为 resolved

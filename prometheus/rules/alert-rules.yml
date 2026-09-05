@@ -1,0 +1,53 @@
+# 鹰眼自定义告警规则（Prometheus 原生 rules 格式）
+# 覆盖：主机资源 / 探测目标 / 告警服务自身
+# 触发后走 Alertmanager → 自研告警服务入库 + 页面展示
+
+groups:
+  - name: node.rules
+    rules:
+      - alert: NodeMemoryHigh
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "主机内存使用率超过 85%"
+          description: "实例 {{ $labels.instance }} 当前内存使用率 {{ printf \"%.1f\" $value }}%"
+
+      - alert: NodeCpuHigh
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "主机 CPU 使用率超过 90%"
+          description: "实例 {{ $labels.instance }} CPU 持续高负载"
+
+      - alert: NodeDiskAlmostFull
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "根分区使用率超过 90%"
+          description: "实例 {{ $labels.instance }} 磁盘即将写满"
+
+  - name: target.rules
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "监控目标失联"
+          description: "任务 {{ $labels.job }} 的目标 {{ $labels.instance }} 无法抓取"
+
+      - alert: HttpProbeFailed
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 探测失败"
+          description: "目标 {{ $labels.instance }} 连续探测失败，服务可能不可用"

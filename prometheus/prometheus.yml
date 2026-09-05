@@ -1,0 +1,56 @@
+# 鹰眼 Prometheus 主配置
+# 抓取目标分五组：监控栈自身 / 主机 / 项目一 MySQL / 项目一应用探针 / 自身健康
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # 1. Prometheus 自身
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 2. 主机资源（node-exporter 采集 CPU/内存/磁盘/网络）
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # 3. 项目一的 MySQL（经 mysqld-exporter 转译）
+  - job_name: mysqld
+    static_configs:
+      - targets: ['mysqld-exporter:9104']
+
+  # 4. 项目一应用与入口的黑盒探针（HTTP 可用性）
+  - job_name: blackbox-web
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://yizhan-nginx/          # 易栈首页（Nginx）
+          - http://yizhan-backend:8080/api/goods/list   # 后端接口
+          - http://hawk-alertservice:8080/api/health    # 鹰眼告警服务自身
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # 5. Alertmanager / Blackbox 自身指标
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['alertmanager:9093']
+  - job_name: blackbox
+    static_configs:
+      - targets: ['blackbox-exporter:9115']
